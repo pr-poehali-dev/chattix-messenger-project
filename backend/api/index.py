@@ -1,7 +1,6 @@
 import json
 import os
 import psycopg2
-import hashlib
 from psycopg2.extras import RealDictCursor
 from typing import Dict, Any
 
@@ -42,81 +41,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             action = body_data.get('action')
             
             if action == 'register':
-                username = body_data.get('username')
-                password = body_data.get('password')
-                
-                if not username or not password:
-                    return {
-                        'statusCode': 400,
-                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                        'body': json.dumps({'error': 'Username and password required'}),
-                        'isBase64Encoded': False
-                    }
-                
-                name = body_data.get('name', username)
-                avatar = body_data.get('avatar', username[0].upper() if username else 'U')
-                
-                password_hash = hashlib.sha256(password.encode()).hexdigest()
+                phone = body_data.get('phone')
+                name = body_data.get('name', 'Пользователь')
+                avatar = body_data.get('avatar', 'П')
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
-                        "SELECT id FROM users WHERE username = %s",
-                        (username,)
-                    )
-                    existing = cur.fetchone()
-                    
-                    if existing:
-                        return {
-                            'statusCode': 400,
-                            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                            'body': json.dumps({'error': 'Username already exists'}),
-                            'isBase64Encoded': False
-                        }
-                    
-                    cur.execute(
-                        "INSERT INTO users (username, password, name, avatar, phone) VALUES (%s, %s, %s, %s, %s) RETURNING id, username, name, avatar",
-                        (username, password_hash, name, avatar, '')
+                        "INSERT INTO users (phone, name, avatar) VALUES (%s, %s, %s) ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING id, phone, name, avatar",
+                        (phone, name, avatar)
                     )
                     conn.commit()
                     user = dict(cur.fetchone())
-                
-                return {
-                    'statusCode': 200,
-                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'user': user}),
-                    'isBase64Encoded': False
-                }
-            
-            elif action == 'login':
-                username = body_data.get('username')
-                password = body_data.get('password')
-                
-                if not username or not password:
-                    return {
-                        'statusCode': 400,
-                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                        'body': json.dumps({'error': 'Username and password required'}),
-                        'isBase64Encoded': False
-                    }
-                
-                password_hash = hashlib.sha256(password.encode()).hexdigest()
-                
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(
-                        "SELECT id, username, name, avatar FROM users WHERE username = %s AND password = %s",
-                        (username, password_hash)
-                    )
-                    user = cur.fetchone()
-                    
-                    if not user:
-                        return {
-                            'statusCode': 401,
-                            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                            'body': json.dumps({'error': 'Invalid username or password'}),
-                            'isBase64Encoded': False
-                        }
-                    
-                    user = dict(user)
                 
                 return {
                     'statusCode': 200,
@@ -224,7 +159,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             elif path == 'contacts' and user_id:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("""
-                        SELECT u.id, u.name, u.username, u.avatar
+                        SELECT u.id, u.name, u.phone, u.avatar
                         FROM users u
                         JOIN contacts c ON c.contact_user_id = u.id
                         WHERE c.user_id = %s

@@ -1,25 +1,14 @@
 {
   "tests": [
     {
-      "name": "Register new user",
+      "name": "Register user",
       "method": "POST",
       "path": "/",
       "body": {
         "action": "register",
-        "username": "testuser",
-        "password": "testpass123",
-        "name": "Test User"
-      },
-      "expectedStatus": 200
-    },
-    {
-      "name": "Login user",
-      "method": "POST",
-      "path": "/",
-      "body": {
-        "action": "login",
-        "username": "testuser",
-        "password": "testpass123"
+        "phone": "+79991234567",
+        "name": "Test User",
+        "avatar": "TU"
       },
       "expectedStatus": 200
     },
