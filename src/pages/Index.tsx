@@ -21,7 +21,7 @@ interface Chat {
 interface Contact {
   id: number;
   name: string;
-  phone: string;
+  username?: string;
   avatar: string;
   online?: boolean;
 }
@@ -30,11 +30,14 @@ const API_URL = 'https://functions.poehali.dev/4e211b7c-8161-4af3-a134-9f3e4b20c
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [phone, setPhone] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [currentTab, setCurrentTab] = useState('chats');
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [message, setMessage] = useState('');
   const [userId, setUserId] = useState<number | null>(null);
+  const [currentUsername, setCurrentUsername] = useState('');
   const [chats, setChats] = useState<Chat[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -82,7 +85,7 @@ const Index = () => {
       setContacts(data.contacts.map((c: any) => ({
         id: c.id,
         name: c.name,
-        phone: c.phone,
+        username: c.username,
         avatar: c.avatar,
         online: false
       })));
@@ -103,34 +106,43 @@ const Index = () => {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length >= 10) {
-      setLoading(true);
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'register',
-            phone: phone,
-            name: 'Пользователь',
-            avatar: 'П'
-          })
-        });
-        const data = await response.json();
-        
-        if (data.user) {
-          setUserId(data.user.id);
-          toast.success('Код отправлен на ваш номер!');
-          setTimeout(() => {
-            setIsAuthenticated(true);
-            toast.success('Добро пожаловать в Чаттикс!');
-          }, 1000);
-        }
-      } catch (error) {
-        toast.error('Ошибка входа');
-      } finally {
-        setLoading(false);
+    
+    if (!username || !password) {
+      toast.error('Заполните все поля');
+      return;
+    }
+
+    if (authMode === 'register' && !name) {
+      toast.error('Введите имя');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: authMode,
+          username: username,
+          password: password,
+          name: authMode === 'register' ? name : undefined,
+          avatar: name ? name[0].toUpperCase() : username[0].toUpperCase()
+        })
+      });
+      const data = await response.json();
+      
+      if (response.ok && data.user) {
+        setUserId(data.user.id);
+        setIsAuthenticated(true);
+        toast.success(authMode === 'register' ? 'Регистрация успешна!' : 'Добро пожаловать!');
+      } else {
+        toast.error(data.error || 'Ошибка авторизации');
       }
+    } catch (error) {
+      toast.error('Ошибка подключения');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -174,25 +186,69 @@ const Index = () => {
             <p className="text-muted-foreground">Современный мессенджер для общения</p>
           </div>
 
+          <div className="flex gap-2 mb-6">
+            <Button
+              type="button"
+              onClick={() => setAuthMode('login')}
+              className={`flex-1 ${authMode === 'login' ? 'gradient-purple text-white' : 'bg-gray-100'}`}
+            >
+              Вход
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setAuthMode('register')}
+              className={`flex-1 ${authMode === 'register' ? 'gradient-purple text-white' : 'bg-gray-100'}`}
+            >
+              Регистрация
+            </Button>
+          </div>
+
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">Номер телефона</label>
+              <label className="text-sm font-medium mb-2 block">Username</label>
               <Input
-                type="tel"
-                placeholder="+7 999 123-45-67"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                type="text"
+                placeholder="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="text-lg"
+                required
               />
             </div>
 
+            <div>
+              <label className="text-sm font-medium mb-2 block">Пароль</label>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="text-lg"
+                required
+              />
+            </div>
+
+            {authMode === 'register' && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">Ваше имя</label>
+                <Input
+                  type="text"
+                  placeholder="Иван Иванов"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="text-lg"
+                  required
+                />
+              </div>
+            )}
+
             <Button type="submit" disabled={loading} className="w-full gradient-purple text-white hover:opacity-90 text-lg py-6">
-              {loading ? 'Загрузка...' : 'Войти'}
+              {loading ? 'Загрузка...' : (authMode === 'register' ? 'Зарегистрироваться' : 'Войти')}
             </Button>
           </form>
 
           <p className="text-xs text-center text-muted-foreground mt-6">
-            Нажимая "Войти", вы соглашаетесь с условиями использования
+            Нажимая кнопку, вы соглашаетесь с условиями использования
           </p>
         </Card>
       </div>
