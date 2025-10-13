@@ -112,11 +112,6 @@ const Index = () => {
       return;
     }
 
-    if (authMode === 'register' && !name) {
-      toast.error('Введите имя');
-      return;
-    }
-
     setLoading(true);
     try {
       const response = await fetch(API_URL, {
@@ -126,14 +121,14 @@ const Index = () => {
           action: authMode,
           username: username,
           password: password,
-          name: authMode === 'register' ? name : undefined,
-          avatar: name ? name[0].toUpperCase() : username[0].toUpperCase()
+          name: username
         })
       });
       const data = await response.json();
       
       if (response.ok && data.user) {
         setUserId(data.user.id);
+        setCurrentUsername(data.user.username);
         setIsAuthenticated(true);
         toast.success(authMode === 'register' ? 'Регистрация успешна!' : 'Добро пожаловать!');
       } else {
@@ -228,19 +223,7 @@ const Index = () => {
               />
             </div>
 
-            {authMode === 'register' && (
-              <div>
-                <label className="text-sm font-medium mb-2 block">Ваше имя</label>
-                <Input
-                  type="text"
-                  placeholder="Иван Иванов"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="text-lg"
-                  required
-                />
-              </div>
-            )}
+
 
             <Button type="submit" disabled={loading} className="w-full gradient-purple text-white hover:opacity-90 text-lg py-6">
               {loading ? 'Загрузка...' : (authMode === 'register' ? 'Зарегистрироваться' : 'Войти')}
@@ -413,7 +396,7 @@ const Index = () => {
                     <AvatarFallback className="text-white text-3xl font-bold">ВЫ</AvatarFallback>
                   </Avatar>
                   <h2 className="text-xl font-bold">Ваш профиль</h2>
-                  <p className="text-sm text-muted-foreground">{phone}</p>
+                  <p className="text-sm text-muted-foreground">@{currentUsername}</p>
                 </div>
 
                 <div className="space-y-2">
