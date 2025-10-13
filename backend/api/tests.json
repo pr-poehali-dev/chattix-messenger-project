@@ -1,0 +1,25 @@
+{
+  "tests": [
+    {
+      "name": "Register user",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "register",
+        "phone": "+79991234567",
+        "name": "Test User",
+        "avatar": "TU"
+      },
+      "expectedStatus": 200
+    },
+    {
+      "name": "Get user chats",
+      "method": "GET",
+      "path": "/?path=chats",
+      "headers": {
+        "X-User-Id": "1"
+      },
+      "expectedStatus": 200
+    }
+  ]
+}

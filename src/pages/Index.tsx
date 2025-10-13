@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -26,42 +26,137 @@ interface Contact {
   online?: boolean;
 }
 
+const API_URL = 'https://functions.poehali.dev/4e211b7c-8161-4af3-a134-9f3e4b20c363';
+
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [phone, setPhone] = useState('');
   const [currentTab, setCurrentTab] = useState('chats');
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [message, setMessage] = useState('');
+  const [userId, setUserId] = useState<number | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const mockChats: Chat[] = [
-    { id: 1, name: 'Анна Петрова', lastMessage: 'Привет! Как дела?', time: '14:23', unread: 2, avatar: 'АП' },
-    { id: 2, name: 'Рабочая группа', lastMessage: 'Встреча в 15:00', time: '13:45', unread: 5, avatar: 'РГ', isGroup: true },
-    { id: 3, name: 'Иван Смирнов', lastMessage: 'Отправил файлы', time: '12:10', unread: 0, avatar: 'ИС' },
-    { id: 4, name: 'Друзья', lastMessage: 'Кто идет в кино?', time: 'Вчера', unread: 1, avatar: 'Д', isGroup: true },
-  ];
+  useEffect(() => {
+    if (isAuthenticated && userId) {
+      loadChats();
+      loadContacts();
+    }
+  }, [isAuthenticated, userId]);
 
-  const mockContacts: Contact[] = [
-    { id: 1, name: 'Анна Петрова', phone: '+7 999 123-45-67', avatar: 'АП', online: true },
-    { id: 2, name: 'Иван Смирнов', phone: '+7 999 234-56-78', avatar: 'ИС', online: false },
-    { id: 3, name: 'Мария Козлова', phone: '+7 999 345-67-89', avatar: 'МК', online: true },
-    { id: 4, name: 'Петр Васильев', phone: '+7 999 456-78-90', avatar: 'ПВ', online: false },
-  ];
+  useEffect(() => {
+    if (selectedChat) {
+      loadMessages(selectedChat.id);
+    }
+  }, [selectedChat]);
 
-  const handleAuth = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (phone.length >= 10) {
-      toast.success('Код отправлен на ваш номер!');
-      setTimeout(() => {
-        setIsAuthenticated(true);
-        toast.success('Добро пожаловать в Чаттикс!');
-      }, 1500);
+  const loadChats = async () => {
+    try {
+      const response = await fetch(`${API_URL}?path=chats`, {
+        headers: { 'X-User-Id': userId?.toString() || '' }
+      });
+      const data = await response.json();
+      setChats(data.chats.map((c: any) => ({
+        id: c.id,
+        name: c.name || 'Чат',
+        lastMessage: c.last_message || '',
+        time: c.time || '',
+        unread: c.unread || 0,
+        avatar: c.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'Ч',
+        isGroup: c.is_group
+      })));
+    } catch (error) {
+      console.error('Error loading chats:', error);
     }
   };
 
-  const handleSendMessage = () => {
-    if (message.trim()) {
-      toast.success('Сообщение отправлено');
-      setMessage('');
+  const loadContacts = async () => {
+    try {
+      const response = await fetch(`${API_URL}?path=contacts`, {
+        headers: { 'X-User-Id': userId?.toString() || '' }
+      });
+      const data = await response.json();
+      setContacts(data.contacts.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        avatar: c.avatar,
+        online: false
+      })));
+    } catch (error) {
+      console.error('Error loading contacts:', error);
+    }
+  };
+
+  const loadMessages = async (chatId: number) => {
+    try {
+      const response = await fetch(`${API_URL}?path=messages&chat_id=${chatId}`);
+      const data = await response.json();
+      setMessages(data.messages || []);
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (phone.length >= 10) {
+      setLoading(true);
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'register',
+            phone: phone,
+            name: 'Пользователь',
+            avatar: 'П'
+          })
+        });
+        const data = await response.json();
+        
+        if (data.user) {
+          setUserId(data.user.id);
+          toast.success('Код отправлен на ваш номер!');
+          setTimeout(() => {
+            setIsAuthenticated(true);
+            toast.success('Добро пожаловать в Чаттикс!');
+          }, 1000);
+        }
+      } catch (error) {
+        toast.error('Ошибка входа');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (message.trim() && selectedChat && userId) {
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send_message',
+            chat_id: selectedChat.id,
+            sender_id: userId,
+            content: message
+          })
+        });
+        
+        if (response.ok) {
+          toast.success('Сообщение отправлено');
+          setMessage('');
+          await loadMessages(selectedChat.id);
+          await loadChats();
+        }
+      } catch (error) {
+        toast.error('Ошибка отправки');
+      }
     }
   };
 
@@ -91,8 +186,8 @@ const Index = () => {
               />
             </div>
 
-            <Button type="submit" className="w-full gradient-purple text-white hover:opacity-90 text-lg py-6">
-              Войти
+            <Button type="submit" disabled={loading} className="w-full gradient-purple text-white hover:opacity-90 text-lg py-6">
+              {loading ? 'Загрузка...' : 'Войти'}
             </Button>
           </form>
 
@@ -146,7 +241,8 @@ const Index = () => {
 
             <TabsContent value="chats" className="flex-1 overflow-y-auto px-2 mt-0">
               <div className="p-2 text-sm font-semibold text-muted-foreground">Чаты</div>
-              {mockChats.map((chat) => (
+              {chats.length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет чатов</div>}
+              {chats.map((chat) => (
                 <Card
                   key={chat.id}
                   className="p-3 mb-2 cursor-pointer hover-scale border-0 shadow-sm hover:shadow-md transition-all"
@@ -178,7 +274,8 @@ const Index = () => {
                   <Icon name="Plus" size={16} />
                 </Button>
               </div>
-              {mockContacts.map((contact) => (
+              {contacts.length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет контактов</div>}
+              {contacts.map((contact) => (
                 <Card key={contact.id} className="p-3 mb-2 hover-scale border-0 shadow-sm hover:shadow-md cursor-pointer">
                   <div className="flex items-center gap-3">
                     <div className="relative">
@@ -205,7 +302,8 @@ const Index = () => {
                   <Icon name="Plus" size={16} />
                 </Button>
               </div>
-              {mockChats.filter(c => c.isGroup).map((group) => (
+              {chats.filter(c => c.isGroup).length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет групп</div>}
+              {chats.filter(c => c.isGroup).map((group) => (
                 <Card key={group.id} className="p-3 mb-2 hover-scale border-0 shadow-sm hover:shadow-md cursor-pointer">
                   <div className="flex items-center gap-3">
                     <Avatar className="gradient-pink">
@@ -312,19 +410,25 @@ const Index = () => {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-br from-purple-50/30 to-cyan-50/30">
-                <div className="flex justify-start">
-                  <Card className="max-w-md p-3 border-purple-200 animate-fade-in">
-                    <p className="text-sm">{selectedChat.lastMessage}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{selectedChat.time}</p>
-                  </Card>
-                </div>
-
-                <div className="flex justify-end">
-                  <Card className="max-w-md p-3 gradient-purple text-white border-0 animate-fade-in">
-                    <p className="text-sm">Отлично, спасибо за информацию!</p>
-                    <p className="text-xs opacity-80 mt-1">14:30</p>
-                  </Card>
-                </div>
+                {messages.length === 0 && (
+                  <div className="flex items-center justify-center h-full">
+                    <p className="text-muted-foreground">Нет сообщений</p>
+                  </div>
+                )}
+                {messages.map((msg) => (
+                  <div key={msg.id} className={`flex ${msg.sender_id === userId ? 'justify-end' : 'justify-start'}`}>
+                    <Card className={`max-w-md p-3 animate-fade-in ${
+                      msg.sender_id === userId 
+                        ? 'gradient-purple text-white border-0' 
+                        : 'border-purple-200'
+                    }`}>
+                      <p className="text-sm">{msg.content}</p>
+                      <p className={`text-xs mt-1 ${
+                        msg.sender_id === userId ? 'opacity-80' : 'text-muted-foreground'
+                      }`}>{msg.time}</p>
+                    </Card>
+                  </div>
+                ))}
               </div>
 
               <div className="p-4 border-t bg-white">
