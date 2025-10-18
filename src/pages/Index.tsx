@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -8,37 +8,60 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 
-interface Chat {
+const API_URL = 'https://functions.poehali.dev/4e211b7c-8161-4af3-a134-9f3e4b20c363';
+
+type Chat = {
   id: number;
   name: string;
-  lastMessage: string;
+  avatar: string;
+  type: string;
+  last_message: string;
   time: string;
   unread: number;
-  avatar: string;
-  isGroup?: boolean;
-}
+};
 
-interface Contact {
+type Contact = {
   id: number;
   name: string;
   phone: string;
   avatar: string;
-  online?: boolean;
-}
+  bio?: string;
+};
 
-const API_URL = 'https://functions.poehali.dev/4e211b7c-8161-4af3-a134-9f3e4b20c363';
+type Message = {
+  id: number;
+  content: string;
+  sender_id: number | null;
+  is_ai: boolean;
+  time: string;
+  sender_name: string;
+  sender_avatar: string;
+};
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [currentTab, setCurrentTab] = useState('chats');
-  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
-  const [message, setMessage] = useState('');
   const [userId, setUserId] = useState<number | null>(null);
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
   const [chats, setChats] = useState<Chat[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [activeTab, setActiveTab] = useState('chats');
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     if (isAuthenticated && userId) {
@@ -47,131 +70,248 @@ const Index = () => {
     }
   }, [isAuthenticated, userId]);
 
-  useEffect(() => {
-    if (selectedChat) {
-      loadMessages(selectedChat.id);
-    }
-  }, [selectedChat]);
-
   const loadChats = async () => {
+    if (!userId) return;
     try {
       const response = await fetch(`${API_URL}?path=chats`, {
-        headers: { 'X-User-Id': userId?.toString() || '' }
+        headers: { 'X-User-Id': userId.toString() }
       });
       const data = await response.json();
-      setChats(data.chats.map((c: any) => ({
-        id: c.id,
-        name: c.name || 'Чат',
-        lastMessage: c.last_message || '',
-        time: c.time || '',
-        unread: c.unread || 0,
-        avatar: c.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'Ч',
-        isGroup: c.is_group
-      })));
+      setChats(data.chats || []);
     } catch (error) {
-      console.error('Error loading chats:', error);
+      console.error('Ошибка загрузки чатов:', error);
     }
   };
 
   const loadContacts = async () => {
+    if (!userId) return;
     try {
       const response = await fetch(`${API_URL}?path=contacts`, {
-        headers: { 'X-User-Id': userId?.toString() || '' }
+        headers: { 'X-User-Id': userId.toString() }
       });
       const data = await response.json();
-      setContacts(data.contacts.map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        phone: c.phone,
-        avatar: c.avatar,
-        online: false
-      })));
+      setContacts(data.contacts || []);
     } catch (error) {
-      console.error('Error loading contacts:', error);
+      console.error('Ошибка загрузки контактов:', error);
     }
   };
 
   const loadMessages = async (chatId: number) => {
     try {
-      const response = await fetch(`${API_URL}?path=messages&chat_id=${chatId}`);
+      const response = await fetch(`${API_URL}?path=messages&chat_id=${chatId}`, {
+        headers: { 'X-User-Id': userId?.toString() || '' }
+      });
       const data = await response.json();
       setMessages(data.messages || []);
     } catch (error) {
-      console.error('Error loading messages:', error);
+      console.error('Ошибка загрузки сообщений:', error);
     }
   };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length >= 10) {
-      setLoading(true);
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'register',
-            phone: phone,
-            name: 'Пользователь',
-            avatar: 'П'
-          })
-        });
-        const data = await response.json();
-        
-        if (data.user) {
-          setUserId(data.user.id);
-          toast.success('Код отправлен на ваш номер!');
-          setTimeout(() => {
-            setIsAuthenticated(true);
-            toast.success('Добро пожаловать в Чаттикс!');
-          }, 1000);
-        }
-      } catch (error) {
-        toast.error('Ошибка входа');
-      } finally {
-        setLoading(false);
+    
+    if (!phone) {
+      toast.error('Введите номер телефона');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'register',
+          phone: phone,
+          name: name || phone
+        })
+      });
+      const data = await response.json();
+      
+      if (response.ok && data.user) {
+        setUserId(data.user.id);
+        setIsAuthenticated(true);
+        toast.success('Добро пожаловать!');
+        await createAIChat(data.user.id);
+      } else {
+        toast.error(data.error || 'Ошибка авторизации');
       }
+    } catch (error) {
+      toast.error('Ошибка подключения');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSendMessage = async () => {
-    if (message.trim() && selectedChat && userId) {
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'send_message',
-            chat_id: selectedChat.id,
-            sender_id: userId,
-            content: message
-          })
-        });
-        
-        if (response.ok) {
-          toast.success('Сообщение отправлено');
-          setMessage('');
-          await loadMessages(selectedChat.id);
-          await loadChats();
-        }
-      } catch (error) {
-        toast.error('Ошибка отправки');
+  const createAIChat = async (userId: number) => {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_group',
+          name: 'Chattik AI',
+          avatar: '🤖',
+          description: 'Ваш умный помощник',
+          created_by: userId,
+          members: []
+        })
+      });
+      
+      if (response.ok) {
+        await loadChats();
       }
+    } catch (error) {
+      console.error('Ошибка создания AI чата:', error);
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageInput.trim() || !selectedChat || !userId) return;
+
+    const userMessage = messageInput;
+    setMessageInput('');
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_message',
+          chat_id: selectedChat.id,
+          sender_id: userId,
+          content: userMessage,
+          is_ai: false
+        })
+      });
+
+      if (response.ok) {
+        await loadMessages(selectedChat.id);
+        
+        if (selectedChat.type === 'group' && selectedChat.name === 'Chattik AI') {
+          setTimeout(async () => {
+            const aiResponse = generateAIResponse(userMessage);
+            await fetch(API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'send_message',
+                chat_id: selectedChat.id,
+                sender_id: null,
+                content: aiResponse,
+                is_ai: true
+              })
+            });
+            await loadMessages(selectedChat.id);
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      toast.error('Ошибка отправки сообщения');
+    }
+  };
+
+  const generateAIResponse = (userMessage: string): string => {
+    const lowerMessage = userMessage.toLowerCase();
+    
+    if (lowerMessage.includes('привет') || lowerMessage.includes('здравствуй')) {
+      return 'Привет! 👋 Я Chattik AI. Чем могу помочь?';
+    }
+    if (lowerMessage.includes('как дела')) {
+      return 'У меня всё отлично! Спасибо, что спросили 😊';
+    }
+    if (lowerMessage.includes('спасибо')) {
+      return 'Всегда пожалуйста! Рад помочь 🤗';
+    }
+    if (lowerMessage.includes('погода')) {
+      return 'К сожалению, у меня нет данных о погоде, но я могу помочь с другими вопросами! ☀️';
+    }
+    if (lowerMessage.includes('время') || lowerMessage.includes('час')) {
+      return `Сейчас ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} ⏰`;
+    }
+    
+    return 'Интересный вопрос! Я всё ещё учусь и развиваюсь. Могу помочь с базовой информацией 🤖';
+  };
+
+  const handleStartChat = async (contact: Contact) => {
+    if (!userId) return;
+    
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_personal_chat',
+          user1_id: userId,
+          user2_id: contact.id
+        })
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        await loadChats();
+        const newChat = chats.find(c => c.id === data.chat.id) || {
+          id: data.chat.id,
+          name: contact.name,
+          avatar: contact.avatar,
+          type: 'personal',
+          last_message: '',
+          time: '',
+          unread: 0
+        };
+        setSelectedChat(newChat);
+        setActiveTab('chats');
+        await loadMessages(data.chat.id);
+      }
+    } catch (error) {
+      toast.error('Ошибка создания чата');
+    }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!groupName.trim() || selectedMembers.length === 0 || !userId) {
+      toast.error('Введите название и выберите участников');
+      return;
+    }
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_group',
+          name: groupName,
+          avatar: '👥',
+          description: '',
+          created_by: userId,
+          members: selectedMembers
+        })
+      });
+
+      if (response.ok) {
+        toast.success('Группа создана!');
+        setShowCreateGroup(false);
+        setGroupName('');
+        setSelectedMembers([]);
+        await loadChats();
+      }
+    } catch (error) {
+      toast.error('Ошибка создания группы');
     }
   };
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen gradient-purple flex items-center justify-center p-4">
-        <Card className="w-full max-w-md p-8 animate-fade-in">
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-white to-cyan-50 p-4">
+        <Card className="w-full max-w-md p-8 shadow-xl">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl gradient-cyan mb-4">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl gradient-purple mb-4">
               <Icon name="MessageCircle" size={40} className="text-white" />
             </div>
-            <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-              CHATTIX
-            </h1>
-            <p className="text-muted-foreground">Современный мессенджер для общения</p>
+            <h1 className="text-3xl font-bold mb-2">Chattik</h1>
+            <p className="text-muted-foreground">Войдите по номеру телефона</p>
           </div>
 
           <form onSubmit={handleAuth} className="space-y-4">
@@ -179,9 +319,21 @@ const Index = () => {
               <label className="text-sm font-medium mb-2 block">Номер телефона</label>
               <Input
                 type="tel"
-                placeholder="+7 999 123-45-67"
+                placeholder="+7 900 123-45-67"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                className="text-lg"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-2 block">Ваше имя (необязательно)</label>
+              <Input
+                type="text"
+                placeholder="Как вас зовут?"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 className="text-lg"
               />
             </div>
@@ -192,281 +344,285 @@ const Index = () => {
           </form>
 
           <p className="text-xs text-center text-muted-foreground mt-6">
-            Нажимая "Войти", вы соглашаетесь с условиями использования
+            Регистрация только по реальному номеру телефона
           </p>
         </Card>
       </div>
     );
   }
 
-  return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-purple-50 to-cyan-50">
-      <header className="gradient-purple text-white px-6 py-4 shadow-lg">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-3">
-            <Icon name="MessageCircle" size={32} />
-            <h1 className="text-2xl font-bold">CHATTIX</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-              <Icon name="Search" size={20} />
-            </Button>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-              <Icon name="Settings" size={20} />
-            </Button>
-          </div>
+  if (showCreateGroup) {
+    return (
+      <div className="h-screen flex flex-col bg-white">
+        <div className="flex items-center gap-3 p-4 border-b bg-white sticky top-0 z-10">
+          <Button variant="ghost" size="icon" onClick={() => setShowCreateGroup(false)}>
+            <Icon name="ArrowLeft" size={24} />
+          </Button>
+          <h2 className="text-xl font-bold">Новая группа</h2>
         </div>
-      </header>
 
-      <div className="flex-1 flex overflow-hidden max-w-7xl mx-auto w-full">
-        <aside className="w-80 bg-white border-r flex flex-col">
-          <Tabs value={currentTab} onValueChange={setCurrentTab} className="flex-1 flex flex-col">
-            <TabsList className="grid grid-cols-5 m-4 p-1 bg-purple-100">
-              <TabsTrigger value="chats" className="data-[state=active]:gradient-purple data-[state=active]:text-white">
-                <Icon name="MessageSquare" size={18} />
-              </TabsTrigger>
-              <TabsTrigger value="contacts" className="data-[state=active]:gradient-purple data-[state=active]:text-white">
-                <Icon name="Users" size={18} />
-              </TabsTrigger>
-              <TabsTrigger value="groups" className="data-[state=active]:gradient-purple data-[state=active]:text-white">
-                <Icon name="UsersRound" size={18} />
-              </TabsTrigger>
-              <TabsTrigger value="ai" className="data-[state=active]:gradient-cyan data-[state=active]:text-white">
-                <Icon name="Sparkles" size={18} />
-              </TabsTrigger>
-              <TabsTrigger value="profile" className="data-[state=active]:gradient-pink data-[state=active]:text-white">
-                <Icon name="User" size={18} />
-              </TabsTrigger>
-            </TabsList>
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="mb-6">
+            <Input
+              placeholder="Название группы"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className="text-lg"
+            />
+          </div>
 
-            <TabsContent value="chats" className="flex-1 overflow-y-auto px-2 mt-0">
-              <div className="p-2 text-sm font-semibold text-muted-foreground">Чаты</div>
-              {chats.length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет чатов</div>}
-              {chats.map((chat) => (
-                <Card
-                  key={chat.id}
-                  className="p-3 mb-2 cursor-pointer hover-scale border-0 shadow-sm hover:shadow-md transition-all"
-                  onClick={() => setSelectedChat(chat)}
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar className={chat.isGroup ? 'gradient-pink' : 'gradient-purple'}>
-                      <AvatarFallback className="text-white font-semibold">{chat.avatar}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold text-sm truncate">{chat.name}</h3>
-                        <span className="text-xs text-muted-foreground">{chat.time}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                    </div>
-                    {chat.unread > 0 && (
-                      <Badge className="gradient-purple text-white">{chat.unread}</Badge>
-                    )}
-                  </div>
-                </Card>
-              ))}
-            </TabsContent>
-
-            <TabsContent value="contacts" className="flex-1 overflow-y-auto px-2 mt-0">
-              <div className="p-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-muted-foreground">Контакты</span>
-                <Button size="sm" className="gradient-purple text-white">
-                  <Icon name="Plus" size={16} />
-                </Button>
-              </div>
-              {contacts.length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет контактов</div>}
-              {contacts.map((contact) => (
-                <Card key={contact.id} className="p-3 mb-2 hover-scale border-0 shadow-sm hover:shadow-md cursor-pointer">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <Avatar className="gradient-cyan">
-                        <AvatarFallback className="text-white font-semibold">{contact.avatar}</AvatarFallback>
-                      </Avatar>
-                      {contact.online && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-sm">{contact.name}</h3>
-                      <p className="text-xs text-muted-foreground">{contact.phone}</p>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </TabsContent>
-
-            <TabsContent value="groups" className="flex-1 overflow-y-auto px-2 mt-0">
-              <div className="p-2 flex items-center justify-between">
-                <span className="text-sm font-semibold text-muted-foreground">Группы</span>
-                <Button size="sm" className="gradient-pink text-white">
-                  <Icon name="Plus" size={16} />
-                </Button>
-              </div>
-              {chats.filter(c => c.isGroup).length === 0 && <div className="p-4 text-center text-muted-foreground text-sm">Нет групп</div>}
-              {chats.filter(c => c.isGroup).map((group) => (
-                <Card key={group.id} className="p-3 mb-2 hover-scale border-0 shadow-sm hover:shadow-md cursor-pointer">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="gradient-pink">
-                      <AvatarFallback className="text-white font-semibold">{group.avatar}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-sm">{group.name}</h3>
-                      <p className="text-xs text-muted-foreground">Участников: 12</p>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </TabsContent>
-
-            <TabsContent value="ai" className="flex-1 overflow-y-auto px-2 mt-0">
-              <div className="p-4">
-                <div className="text-center mb-6">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-cyan mb-3">
-                    <Icon name="Sparkles" size={32} className="text-white" />
-                  </div>
-                  <h2 className="text-xl font-bold mb-2">Chattik AI</h2>
-                  <p className="text-sm text-muted-foreground">Ваш умный помощник</p>
-                </div>
-
-                <Card className="p-4 gradient-cyan text-white mb-3">
-                  <p className="text-sm mb-2">Привет! Я Chattik AI 👋</p>
-                  <p className="text-xs opacity-90">Я могу помочь вам с поиском информации, ответить на вопросы и многое другое!</p>
-                </Card>
-
-                <div className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="Lightbulb" size={16} className="mr-2" />
-                    Подсказать идею
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="FileText" size={16} className="mr-2" />
-                    Написать текст
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="Languages" size={16} className="mr-2" />
-                    Перевести сообщение
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="profile" className="flex-1 overflow-y-auto px-2 mt-0">
-              <div className="p-4">
-                <div className="text-center mb-6">
-                  <Avatar className="w-24 h-24 gradient-pink mx-auto mb-3">
-                    <AvatarFallback className="text-white text-3xl font-bold">ВЫ</AvatarFallback>
-                  </Avatar>
-                  <h2 className="text-xl font-bold">Ваш профиль</h2>
-                  <p className="text-sm text-muted-foreground">{phone}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="User" size={16} className="mr-2" />
-                    Редактировать профиль
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="Bell" size={16} className="mr-2" />
-                    Уведомления
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="Lock" size={16} className="mr-2" />
-                    Приватность
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Icon name="Palette" size={16} className="mr-2" />
-                    Оформление
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start text-red-600 hover:text-red-700">
-                    <Icon name="LogOut" size={16} className="mr-2" />
-                    Выйти
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </aside>
-
-        <main className="flex-1 flex flex-col bg-white">
-          {selectedChat ? (
-            <>
-              <div className="gradient-purple text-white px-6 py-4 flex items-center gap-3 shadow-md">
-                <Avatar className={selectedChat.isGroup ? 'gradient-pink' : 'gradient-cyan'}>
-                  <AvatarFallback className="text-white font-semibold">{selectedChat.avatar}</AvatarFallback>
+          <h3 className="font-semibold mb-3">Участники</h3>
+          <div className="space-y-2">
+            {contacts.map((contact) => (
+              <div
+                key={contact.id}
+                onClick={() => {
+                  if (selectedMembers.includes(contact.id)) {
+                    setSelectedMembers(selectedMembers.filter(id => id !== contact.id));
+                  } else {
+                    setSelectedMembers([...selectedMembers, contact.id]);
+                  }
+                }}
+                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer ${
+                  selectedMembers.includes(contact.id) ? 'bg-purple-50' : 'hover:bg-gray-50'
+                }`}
+              >
+                <Avatar className="w-12 h-12">
+                  <AvatarFallback className="gradient-pink text-white font-semibold">
+                    {contact.avatar}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
-                  <h2 className="font-semibold">{selectedChat.name}</h2>
-                  <p className="text-xs opacity-80">онлайн</p>
+                  <div className="font-semibold">{contact.name}</div>
+                  <div className="text-sm text-muted-foreground">{contact.phone}</div>
                 </div>
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-                  <Icon name="Phone" size={20} />
-                </Button>
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-                  <Icon name="Video" size={20} />
-                </Button>
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-                  <Icon name="MoreVertical" size={20} />
-                </Button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-br from-purple-50/30 to-cyan-50/30">
-                {messages.length === 0 && (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-muted-foreground">Нет сообщений</p>
-                  </div>
+                {selectedMembers.includes(contact.id) && (
+                  <Icon name="Check" size={20} className="text-purple-600" />
                 )}
-                {messages.map((msg) => (
-                  <div key={msg.id} className={`flex ${msg.sender_id === userId ? 'justify-end' : 'justify-start'}`}>
-                    <Card className={`max-w-md p-3 animate-fade-in ${
-                      msg.sender_id === userId 
-                        ? 'gradient-purple text-white border-0' 
-                        : 'border-purple-200'
-                    }`}>
-                      <p className="text-sm">{msg.content}</p>
-                      <p className={`text-xs mt-1 ${
-                        msg.sender_id === userId ? 'opacity-80' : 'text-muted-foreground'
-                      }`}>{msg.time}</p>
-                    </Card>
-                  </div>
-                ))}
               </div>
+            ))}
+          </div>
+        </div>
 
-              <div className="p-4 border-t bg-white">
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="icon" className="text-purple-600">
-                    <Icon name="Paperclip" size={20} />
-                  </Button>
-                  <Input
-                    placeholder="Напишите сообщение..."
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    className="flex-1"
-                  />
-                  <Button variant="ghost" size="icon" className="text-purple-600">
-                    <Icon name="Smile" size={20} />
-                  </Button>
-                  <Button className="gradient-purple text-white" onClick={handleSendMessage}>
-                    <Icon name="Send" size={20} />
-                  </Button>
+        <div className="p-4 border-t bg-white">
+          <Button 
+            onClick={handleCreateGroup} 
+            className="w-full gradient-purple text-white py-6"
+            disabled={!groupName.trim() || selectedMembers.length === 0}
+          >
+            Создать группу ({selectedMembers.length})
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedChat) {
+    return (
+      <div className="h-screen flex flex-col bg-gray-50">
+        <div className="flex items-center gap-3 p-4 border-b bg-white sticky top-0 z-10">
+          <Button variant="ghost" size="icon" onClick={() => setSelectedChat(null)}>
+            <Icon name="ArrowLeft" size={24} />
+          </Button>
+          <Avatar className="w-10 h-10">
+            <AvatarFallback className="gradient-cyan text-white font-semibold text-sm">
+              {selectedChat.avatar}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1">
+            <div className="font-bold">{selectedChat.name}</div>
+            <div className="text-xs text-muted-foreground">онлайн</div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-2 ${msg.sender_id === userId ? 'flex-row-reverse' : ''}`}
+            >
+              {msg.sender_id !== userId && (
+                <Avatar className="w-8 h-8">
+                  <AvatarFallback className="gradient-pink text-white text-xs">
+                    {msg.sender_avatar}
+                  </AvatarFallback>
+                </Avatar>
+              )}
+              <div className={`max-w-[75%] ${msg.sender_id === userId ? 'items-end' : 'items-start'} flex flex-col`}>
+                {msg.sender_id !== userId && selectedChat.type === 'group' && (
+                  <div className="text-xs font-medium text-purple-600 mb-1">{msg.sender_name}</div>
+                )}
+                <div
+                  className={`rounded-2xl px-4 py-2 ${
+                    msg.sender_id === userId
+                      ? 'bg-purple-600 text-white rounded-tr-sm'
+                      : msg.is_ai
+                      ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white rounded-tl-sm'
+                      : 'bg-white border rounded-tl-sm'
+                  }`}
+                >
+                  <p className="text-sm">{msg.content}</p>
+                  <div className={`text-xs mt-1 ${msg.sender_id === userId || msg.is_ai ? 'text-white/70' : 'text-muted-foreground'}`}>
+                    {msg.time}
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-purple-50/30 to-cyan-50/30">
-              <div className="text-center">
-                <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl gradient-cyan mb-4">
-                  <Icon name="MessageCircle" size={48} className="text-white" />
-                </div>
-                <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-cyan-600 bg-clip-text text-transparent">
-                  Выберите чат
-                </h2>
-                <p className="text-muted-foreground">Начните общение с друзьями и коллегами</p>
               </div>
             </div>
-          )}
-        </main>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form onSubmit={handleSendMessage} className="p-4 bg-white border-t">
+          <div className="flex gap-2">
+            <Input
+              value={messageInput}
+              onChange={(e) => setMessageInput(e.target.value)}
+              placeholder="Сообщение..."
+              className="flex-1 rounded-full"
+            />
+            <Button type="submit" size="icon" className="rounded-full gradient-purple text-white">
+              <Icon name="Send" size={20} />
+            </Button>
+          </div>
+        </form>
       </div>
+    );
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-white">
+      <div className="p-4 border-b bg-white sticky top-0 z-10">
+        <h1 className="text-2xl font-bold">Chattik</h1>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+        <TabsList className="w-full grid grid-cols-3 rounded-none border-b">
+          <TabsTrigger value="chats" className="gap-2">
+            <Icon name="MessageCircle" size={18} />
+            Чаты
+          </TabsTrigger>
+          <TabsTrigger value="contacts" className="gap-2">
+            <Icon name="Users" size={18} />
+            Контакты
+          </TabsTrigger>
+          <TabsTrigger value="profile" className="gap-2">
+            <Icon name="User" size={18} />
+            Профиль
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chats" className="flex-1 overflow-y-auto m-0">
+          <div className="p-2">
+            {chats.map((chat) => (
+              <div
+                key={chat.id}
+                onClick={() => {
+                  setSelectedChat(chat);
+                  loadMessages(chat.id);
+                }}
+                className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl cursor-pointer active:bg-gray-100"
+              >
+                <Avatar className="w-14 h-14">
+                  <AvatarFallback className={`${chat.type === 'group' ? 'gradient-cyan' : 'gradient-pink'} text-white font-semibold`}>
+                    {chat.avatar}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold truncate">{chat.name}</span>
+                    <span className="text-xs text-muted-foreground">{chat.time}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground truncate">{chat.last_message}</p>
+                    {chat.unread > 0 && (
+                      <Badge className="ml-2 gradient-purple text-white">{chat.unread}</Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="contacts" className="flex-1 overflow-y-auto m-0">
+          <div className="p-4">
+            <Button 
+              onClick={() => setShowCreateGroup(true)} 
+              className="w-full gradient-purple text-white mb-4 py-6"
+            >
+              <Icon name="Users" size={20} className="mr-2" />
+              Создать группу
+            </Button>
+
+            <div className="space-y-2">
+              {contacts.map((contact) => (
+                <div
+                  key={contact.id}
+                  onClick={() => handleStartChat(contact)}
+                  className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl cursor-pointer active:bg-gray-100"
+                >
+                  <Avatar className="w-12 h-12">
+                    <AvatarFallback className="gradient-pink text-white font-semibold">
+                      {contact.avatar}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="font-semibold">{contact.name}</div>
+                    <div className="text-sm text-muted-foreground">{contact.phone}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="profile" className="flex-1 overflow-y-auto m-0">
+          <div className="p-4">
+            <div className="text-center mb-6">
+              <Avatar className="w-24 h-24 gradient-pink mx-auto mb-3">
+                <AvatarFallback className="text-white text-3xl font-bold">{name ? name[0].toUpperCase() : 'П'}</AvatarFallback>
+              </Avatar>
+              <h2 className="text-xl font-bold">{name || 'Пользователь'}</h2>
+              <p className="text-sm text-muted-foreground">{phone}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <Icon name="Phone" size={20} className="text-muted-foreground" />
+                  <div>
+                    <div className="text-sm text-muted-foreground">Телефон</div>
+                    <div className="font-medium">{phone}</div>
+                  </div>
+                </div>
+              </Card>
+              
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <Icon name="User" size={20} className="text-muted-foreground" />
+                  <div>
+                    <div className="text-sm text-muted-foreground">Имя</div>
+                    <div className="font-medium">{name || 'Не указано'}</div>
+                  </div>
+                </div>
+              </Card>
+
+              <Button 
+                onClick={() => {
+                  setIsAuthenticated(false);
+                  setUserId(null);
+                  toast.success('Вы вышли из аккаунта');
+                }} 
+                variant="destructive" 
+                className="w-full mt-4"
+              >
+                <Icon name="LogOut" size={20} className="mr-2" />
+                Выйти
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
