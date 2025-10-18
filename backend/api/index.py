@@ -3,9 +3,17 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import Dict, Any
+import urllib.request
+import urllib.error
+
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 def get_db_connection():
-    return psycopg2.connect(os.environ['DATABASE_URL'])
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    with conn.cursor() as cur:
+        cur.execute("SELECT current_schema()")
+        schema = cur.fetchone()[0]
+    return conn, schema
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
@@ -33,7 +41,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     params = event.get('queryStringParameters', {}) or {}
     path = params.get('path', '')
     
-    conn = get_db_connection()
+    conn, schema = get_db_connection()
     
     try:
         if method == 'POST':
@@ -46,10 +54,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 avatar = body_data.get('avatar', 'П')
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(
-                        "INSERT INTO users (phone, name, avatar) VALUES (%s, %s, %s) ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING id, phone, name, avatar",
-                        (phone, name, avatar)
-                    )
+                    cur.execute(f"INSERT INTO {schema}.users (phone, name, avatar) VALUES (%s, %s, %s) ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING id, phone, name, avatar", (phone, name, avatar))
                     conn.commit()
                     user = dict(cur.fetchone())
                 
@@ -64,11 +69,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 chat_id = body_data.get('chat_id')
                 sender_id = body_data.get('sender_id')
                 content = body_data.get('content')
+                is_ai = body_data.get('is_ai', False)
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
-                        "INSERT INTO messages (chat_id, sender_id, content) VALUES (%s, %s, %s) RETURNING id, chat_id, sender_id, content, created_at",
-                        (chat_id, sender_id, content)
+                        f"INSERT INTO {schema}.messages (chat_id, sender_id, content, is_ai) VALUES (%s, %s, %s, %s) RETURNING id, chat_id, sender_id, content, created_at, is_ai",
+                        (chat_id, sender_id, content, is_ai)
                     )
                     conn.commit()
                     message = dict(cur.fetchone())
@@ -115,7 +121,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
-                        "INSERT INTO contacts (user_id, contact_user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        f"INSERT INTO {schema}.contacts (user_id, contact_user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (user_id_param, contact_user_id)
                     )
                     conn.commit()
@@ -126,6 +132,84 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'body': json.dumps({'success': True}),
                     'isBase64Encoded': False
                 }
+            
+            elif action == 'create_group':
+                name = body_data.get('name')
+                description = body_data.get('description', '')
+                avatar = body_data.get('avatar', '👥')
+                created_by = body_data.get('created_by')
+                member_ids = body_data.get('member_ids', [])
+                
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(f"INSERT INTO {schema}.groups (name, description, avatar, created_by) VALUES (%s, %s, %s, %s) RETURNING id", (name, description, avatar, created_by))
+                    group_id = cur.fetchone()['id']
+                    
+                    cur.execute(f"INSERT INTO {schema}.chats (type, group_id) VALUES ('group', %s) RETURNING id", (group_id,))
+                    chat_id = cur.fetchone()['id']
+                    
+                    all_members = [created_by] + member_ids
+                    for member_id in all_members:
+                        cur.execute(f"INSERT INTO {schema}.group_members (group_id, user_id, role) VALUES (%s, %s, %s)", (group_id, member_id, 'admin' if member_id == created_by else 'member'))
+                        cur.execute(f"INSERT INTO {schema}.chat_participants (chat_id, user_id) VALUES (%s, %s)", (chat_id, member_id))
+                    
+                    conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'group_id': group_id, 'chat_id': chat_id}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'ai_response':
+                user_message = body_data.get('message', '')
+                
+                if not OPENAI_API_KEY:
+                    return {
+                        'statusCode': 200,
+                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                        'body': json.dumps({'response': 'AI временно недоступен. Добавьте OPENAI_API_KEY в настройки проекта.'}),
+                        'isBase64Encoded': False
+                    }
+                
+                openai_data = {
+                    'model': 'gpt-3.5-turbo',
+                    'messages': [
+                        {'role': 'system', 'content': 'Ты - Chattik AI, дружелюбный помощник в мессенджере Chattik. Отвечай кратко, по-дружески и на русском языке.'},
+                        {'role': 'user', 'content': user_message}
+                    ],
+                    'max_tokens': 500,
+                    'temperature': 0.7
+                }
+                
+                request_data = json.dumps(openai_data).encode('utf-8')
+                req = urllib.request.Request(
+                    'https://api.openai.com/v1/chat/completions',
+                    data=request_data,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {OPENAI_API_KEY}'
+                    }
+                )
+                
+                try:
+                    with urllib.request.urlopen(req) as response:
+                        result = json.loads(response.read().decode('utf-8'))
+                        ai_response = result['choices'][0]['message']['content']
+                        
+                        return {
+                            'statusCode': 200,
+                            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                            'body': json.dumps({'response': ai_response}),
+                            'isBase64Encoded': False
+                        }
+                except Exception:
+                    return {
+                        'statusCode': 200,
+                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                        'body': json.dumps({'response': 'Извините, произошла ошибка. Попробуйте позже.'}),
+                        'isBase64Encoded': False
+                    }
         
         elif method == 'GET':
             if path == 'chats' and user_id:
@@ -158,12 +242,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             elif path == 'contacts' and user_id:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("""
-                        SELECT u.id, u.name, u.phone, u.avatar
-                        FROM users u
-                        JOIN contacts c ON c.contact_user_id = u.id
-                        WHERE c.user_id = %s
-                        ORDER BY u.name
+                    cur.execute(f"""
+                        SELECT id, name, phone, avatar, COALESCE(is_online, false) as is_online
+                        FROM {schema}.users
+                        WHERE id != %s
+                        ORDER BY name
                     """, (user_id,))
                     contacts = [dict(row) for row in cur.fetchall()]
                 
@@ -177,17 +260,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             elif path == 'messages':
                 chat_id = params.get('chat_id')
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("""
-                        SELECT m.id, m.chat_id, m.sender_id, m.content,
-                               TO_CHAR(m.created_at, 'HH24:MI') as time,
+                    cur.execute(f"""
+                        SELECT m.id, m.chat_id, m.sender_id, m.content, m.created_at,
+                               COALESCE(m.is_ai, false) as is_ai,
                                u.name as sender_name, u.avatar as sender_avatar
-                        FROM messages m
-                        JOIN users u ON u.id = m.sender_id
+                        FROM {schema}.messages m
+                        LEFT JOIN {schema}.users u ON u.id = m.sender_id
                         WHERE m.chat_id = %s
                         ORDER BY m.created_at ASC
                         LIMIT 100
                     """, (chat_id,))
                     messages = [dict(row) for row in cur.fetchall()]
+                    
+                    for msg in messages:
+                        if msg['created_at']:
+                            msg['created_at'] = msg['created_at'].isoformat()
                 
                 return {
                     'statusCode': 200,
