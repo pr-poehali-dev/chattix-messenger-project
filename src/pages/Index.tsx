@@ -478,22 +478,14 @@ export default function Index() {
             <h1 className="text-2xl font-bold">Chattik</h1>
             <p className="text-sm text-muted-foreground">{phone}</p>
           </div>
-          <div className="flex gap-2">
-            <Button 
-              onClick={() => window.open('https://t.me/+mFgHJEJstgVmY2Iy', '_blank')}
-              className="gradient-pink text-white"
-            >
-              <Icon name="Sparkles" size={20} className="mr-2" />
-              Купить чатиксы
-            </Button>
-            <Dialog open={showNewGroup} onOpenChange={setShowNewGroup}>
-              <DialogTrigger asChild>
-                <Button className="gradient-purple text-white">
-                  <Icon name="Plus" size={20} className="mr-2" />
-                  Группа
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
+          <Dialog open={showNewGroup} onOpenChange={setShowNewGroup}>
+            <DialogTrigger asChild>
+              <Button className="gradient-purple text-white">
+                <Icon name="Plus" size={20} className="mr-2" />
+                Группа
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
               <DialogHeader>
                 <DialogTitle>Новая группа</DialogTitle>
               </DialogHeader>
@@ -528,8 +520,7 @@ export default function Index() {
                 </Button>
               </div>
             </DialogContent>
-            </Dialog>
-          </div>
+          </Dialog>
         </div>
       </div>
 
