@@ -68,6 +68,45 @@ export default function Index() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (!userId) return;
+    
+    const updateOnlineStatus = async (isOnline: boolean) => {
+      try {
+        await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_online_status',
+            user_id: userId,
+            is_online: isOnline
+          })
+        });
+      } catch (error) {
+        console.error('Error updating online status:', error);
+      }
+    };
+
+    updateOnlineStatus(true);
+
+    const interval = setInterval(() => {
+      updateOnlineStatus(true);
+      loadContacts(userId);
+    }, 30000);
+
+    const handleBeforeUnload = () => {
+      updateOnlineStatus(false);
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      updateOnlineStatus(false);
+    };
+  }, [userId]);
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -118,6 +157,22 @@ export default function Index() {
     }
   };
 
+  const updateUserStatus = async (uid: number) => {
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_status',
+          user_id: uid,
+          is_online: true
+        })
+      });
+    } catch (error) {
+      console.error('Failed to update status');
+    }
+  };
+
   const loadContacts = async (uid: number) => {
     try {
       const response = await fetch(`${API_URL}?path=contacts&user_id=${uid}`);
@@ -129,6 +184,17 @@ export default function Index() {
       console.error('Error loading contacts:', error);
     }
   };
+
+  useEffect(() => {
+    if (userId && isAuthenticated) {
+      const interval = setInterval(() => {
+        updateUserStatus(userId);
+        loadContacts(userId);
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [userId, isAuthenticated]);
 
   const loadMessages = async (chatId: number) => {
     try {
@@ -162,7 +228,8 @@ export default function Index() {
           action: 'send_message',
           chat_id: selectedChat.id,
           sender_id: userId,
-          content
+          content,
+          should_reply: selectedChat.type === 'ai'
         })
       });
 
@@ -171,36 +238,8 @@ export default function Index() {
       if (response.ok && data.message) {
         setMessages(prev => [...prev, data.message]);
         
-        if (selectedChat.type === 'ai') {
-          const aiResponse = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'ai_response',
-              message: content
-            })
-          });
-          
-          const aiData = await aiResponse.json();
-          
-          if (aiData.response) {
-            const aiMessageResponse = await fetch(API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: 'send_message',
-                chat_id: selectedChat.id,
-                sender_id: null,
-                content: aiData.response,
-                is_ai: true
-              })
-            });
-            
-            const aiMessageData = await aiMessageResponse.json();
-            if (aiMessageData.message) {
-              setMessages(prev => [...prev, aiMessageData.message]);
-            }
-          }
+        if (data.ai_reply) {
+          setMessages(prev => [...prev, data.ai_reply]);
         }
         
         loadChats(userId);

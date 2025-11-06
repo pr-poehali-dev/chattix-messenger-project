@@ -54,7 +54,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 avatar = body_data.get('avatar', 'П')
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(f"INSERT INTO {schema}.users (phone, name, avatar) VALUES (%s, %s, %s) ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING id, phone, name, avatar", (phone, name, avatar))
+                    cur.execute(f"""
+                        INSERT INTO {schema}.users (phone, name, avatar, is_online, last_seen) 
+                        VALUES (%s, %s, %s, true, NOW()) 
+                        ON CONFLICT (phone) 
+                        DO UPDATE SET name = EXCLUDED.name, is_online = true, last_seen = NOW() 
+                        RETURNING id, phone, name, avatar
+                    """, (phone, name, avatar))
                     conn.commit()
                     user = dict(cur.fetchone())
                 
@@ -70,6 +76,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 sender_id = body_data.get('sender_id')
                 content = body_data.get('content')
                 is_ai = body_data.get('is_ai', False)
+                should_reply = body_data.get('should_reply', False)
                 
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
@@ -80,10 +87,51 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     message = dict(cur.fetchone())
                     message['created_at'] = message['created_at'].isoformat()
                 
+                ai_reply = None
+                if should_reply and not is_ai and OPENAI_API_KEY:
+                    openai_data = {
+                        'model': 'gpt-3.5-turbo',
+                        'messages': [
+                            {'role': 'system', 'content': 'Ты - Chattik AI, дружелюбный помощник в мессенджере Chattik. Отвечай кратко, по-дружески и на русском языке.'},
+                            {'role': 'user', 'content': content}
+                        ],
+                        'max_tokens': 500,
+                        'temperature': 0.7
+                    }
+                    
+                    request_data = json.dumps(openai_data).encode('utf-8')
+                    req = urllib.request.Request(
+                        'https://api.openai.com/v1/chat/completions',
+                        data=request_data,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'Authorization': f'Bearer {OPENAI_API_KEY}'
+                        }
+                    )
+                    
+                    try:
+                        with urllib.request.urlopen(req) as response:
+                            result = json.loads(response.read().decode('utf-8'))
+                            ai_response_text = result['choices'][0]['message']['content']
+                            
+                            cur.execute(
+                                f"INSERT INTO {schema}.messages (chat_id, sender_id, content, is_ai) VALUES (%s, %s, %s, %s) RETURNING id, chat_id, sender_id, content, created_at, is_ai",
+                                (chat_id, None, ai_response_text, True)
+                            )
+                            conn.commit()
+                            ai_reply = dict(cur.fetchone())
+                            ai_reply['created_at'] = ai_reply['created_at'].isoformat()
+                    except Exception:
+                        pass
+                
+                response_data = {'message': message}
+                if ai_reply:
+                    response_data['ai_reply'] = ai_reply
+                
                 return {
                     'statusCode': 200,
                     'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'message': message}),
+                    'body': json.dumps(response_data),
                     'isBase64Encoded': False
                 }
             
@@ -123,6 +171,42 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     cur.execute(
                         f"INSERT INTO {schema}.contacts (user_id, contact_user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (user_id_param, contact_user_id)
+                    )
+                    conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'success': True}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'update_online_status':
+                user_id_param = body_data.get('user_id')
+                is_online = body_data.get('is_online', True)
+                
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        f"UPDATE {schema}.users SET is_online = %s, last_seen = CURRENT_TIMESTAMP WHERE id = %s",
+                        (is_online, user_id_param)
+                    )
+                    conn.commit()
+                
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'success': True}),
+                    'isBase64Encoded': False
+                }
+            
+            elif action == 'update_status':
+                user_id_param = body_data.get('user_id')
+                is_online = body_data.get('is_online', True)
+                
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        f"UPDATE {schema}.users SET is_online = %s, last_seen = NOW() WHERE id = %s",
+                        (is_online, user_id_param)
                     )
                     conn.commit()
                 
@@ -243,12 +327,24 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             elif path == 'contacts' and user_id:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(f"""
-                        SELECT id, name, phone, avatar, COALESCE(is_online, false) as is_online
+                        SELECT id, name, phone, avatar, 
+                               COALESCE(is_online, false) as is_online,
+                               CASE 
+                                   WHEN last_seen IS NOT NULL 
+                                        AND last_seen > NOW() - INTERVAL '5 minutes' 
+                                   THEN true 
+                                   ELSE COALESCE(is_online, false)
+                               END as is_online_realtime
                         FROM {schema}.users
                         WHERE id != %s
                         ORDER BY name
                     """, (user_id,))
                     contacts = [dict(row) for row in cur.fetchall()]
+                    
+                    for contact in contacts:
+                        contact['is_online'] = contact.get('is_online_realtime', False)
+                        if 'is_online_realtime' in contact:
+                            del contact['is_online_realtime']
                 
                 return {
                     'statusCode': 200,
