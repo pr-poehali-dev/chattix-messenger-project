@@ -493,7 +493,7 @@ export default function Index() {
                   Группа
                 </Button>
               </DialogTrigger>
-            <DialogContent>
+              <DialogContent>
               <DialogHeader>
                 <DialogTitle>Новая группа</DialogTitle>
               </DialogHeader>
@@ -528,7 +528,8 @@ export default function Index() {
                 </Button>
               </div>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
       </div>
 
