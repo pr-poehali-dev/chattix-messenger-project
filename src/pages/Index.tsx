@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Checkbox } from '@/components/ui/checkbox';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
+import AddContactDialog from '@/components/chat/AddContactDialog';
 
 const API_URL = 'https://functions.poehali.dev/4e211b7c-8161-4af3-a134-9f3e4b20c363';
 
@@ -531,6 +532,13 @@ export default function Index() {
         </TabsContent>
 
         <TabsContent value="contacts" className="flex-1 overflow-y-auto px-4 mt-0">
+          <div className="py-2">
+            <AddContactDialog 
+              apiUrl={API_URL} 
+              userId={userId!} 
+              onContactAdded={() => loadContacts(userId!)} 
+            />
+          </div>
           <div className="space-y-2 py-2">
             {contacts.map(contact => (
               <Card

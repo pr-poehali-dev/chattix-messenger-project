@@ -282,6 +282,31 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'body': json.dumps({'messages': messages}),
                     'isBase64Encoded': False
                 }
+            
+            elif path == 'search_user':
+                search_phone = params.get('phone', '')
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(f"""
+                        SELECT id, name, phone, avatar
+                        FROM {schema}.users
+                        WHERE phone = %s
+                    """, (search_phone,))
+                    user = cur.fetchone()
+                
+                if user:
+                    return {
+                        'statusCode': 200,
+                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                        'body': json.dumps({'user': dict(user)}),
+                        'isBase64Encoded': False
+                    }
+                else:
+                    return {
+                        'statusCode': 404,
+                        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                        'body': json.dumps({'error': 'User not found'}),
+                        'isBase64Encoded': False
+                    }
         
         return {
             'statusCode': 400,
