@@ -57,6 +57,7 @@ export default function Index() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
+  const [chatiks, setChatiks] = useState(0);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -132,6 +133,7 @@ export default function Index() {
       if (response.ok && data.user) {
         setUserId(data.user.id);
         setIsAuthenticated(true);
+        setChatiks(data.user.chatiks || 0);
         toast.success('Добро пожаловать в Chattik!');
         loadChats(data.user.id);
         loadContacts(data.user.id);
@@ -478,7 +480,11 @@ export default function Index() {
             <h1 className="text-2xl font-bold">Chattik</h1>
             <p className="text-sm text-muted-foreground">{phone}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
+              <Icon name="Coins" size={18} className="text-purple-500" />
+              <span className="font-semibold text-purple-600">{chatiks}</span>
+            </div>
             <Button 
               onClick={() => window.open('https://t.me/+mFgHJEJstgVmY2Iy', '_blank')}
               className="gradient-pink text-white pulse-glow"
@@ -534,10 +540,11 @@ export default function Index() {
       </div>
 
       <Tabs defaultValue="chats" className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="chats">Чаты</TabsTrigger>
           <TabsTrigger value="contacts">Контакты</TabsTrigger>
           <TabsTrigger value="ai">AI</TabsTrigger>
+          <TabsTrigger value="profile">Профиль</TabsTrigger>
         </TabsList>
 
         <TabsContent value="chats" className="flex-1 overflow-y-auto px-4 mt-0">
@@ -655,6 +662,88 @@ export default function Index() {
                 </div>
               </Card>
             </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="profile" className="flex-1 overflow-y-auto px-4 mt-0">
+          <div className="space-y-4 py-4">
+            <div className="text-center py-6">
+              <Avatar className="w-24 h-24 mx-auto gradient-purple mb-4">
+                <AvatarFallback className="text-white font-bold text-3xl">
+                  {(name || phone)[0].toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <h2 className="text-2xl font-bold">{name || phone}</h2>
+              <p className="text-muted-foreground">{phone}</p>
+            </div>
+
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center">
+                    <Icon name="Coins" size={24} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Баланс чатиксов</p>
+                    <p className="text-3xl font-bold text-purple-600">{chatiks}</p>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => window.open('https://t.me/+mFgHJEJstgVmY2Iy', '_blank')}
+                  className="gradient-pink text-white"
+                >
+                  <Icon name="Plus" size={20} className="mr-2" />
+                  Пополнить
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Используйте чатиксы для общения с AI и создания групп
+              </p>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4 flex items-center gap-2">
+                <Icon name="BarChart3" size={20} />
+                Статистика
+              </h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Всего чатов</span>
+                  <span className="font-semibold">{chats.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Контактов</span>
+                  <span className="font-semibold">{contacts.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Групповых чатов</span>
+                  <span className="font-semibold">
+                    {chats.filter(c => c.type === 'group').length}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4 flex items-center gap-2">
+                <Icon name="Info" size={20} />
+                О приложении
+              </h3>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>Chattik — современный мессенджер с AI</p>
+                <p>Версия: 1.0.0</p>
+                <p>
+                  <a 
+                    href="https://t.me/+QgiLIa1gFRY4Y2Iy" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-purple-600 hover:underline"
+                  >
+                    Сообщество пользователей
+                  </a>
+                </p>
+              </div>
+            </Card>
           </div>
         </TabsContent>
       </Tabs>
