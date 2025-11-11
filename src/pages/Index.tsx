@@ -58,6 +58,10 @@ export default function Index() {
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [chatiks, setChatiks] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [newChatiks, setNewChatiks] = useState('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -134,6 +138,13 @@ export default function Index() {
         setUserId(data.user.id);
         setIsAuthenticated(true);
         setChatiks(data.user.chatiks || 0);
+        
+        // Проверка админа
+        if (data.user.phone === '980949950' && data.user.name.toLowerCase() === 'slayer studio official') {
+          setIsAdmin(true);
+          loadAllUsers();
+        }
+        
         toast.success('Добро пожаловать в Chattik!');
         loadChats(data.user.id);
         loadContacts(data.user.id);
